@@ -1,0 +1,22 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+
+# WebAssembly / Node
+/pkg/
+/node_modules/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
