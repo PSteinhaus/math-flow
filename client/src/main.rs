@@ -117,8 +117,20 @@ async fn main() {
     let mut camera_pos =
         vec2(0.0,0.0);
 
-    let zoom =
-        1.0;
+    let zoom = 1.0;
+    
+    // Initialize the offscreen Render Target (Half scale)
+    let render_scale = 0.5; // 0.5 = half resolution, 0.75 = 3/4 resolution
+    
+    let mut render_t = render_target(
+        (screen_width() * render_scale) as u32,
+        (screen_height() * render_scale) as u32,
+    );
+    
+    // Linear filtering ensures the upscale is smooth, not blocky
+    render_t.texture.set_filter(FilterMode::Linear);
+
+    let mut last_screen_size = (screen_width(), screen_height());
 
     loop {
 
@@ -126,9 +138,10 @@ async fn main() {
         // TEST INPUT
         // -------------------------------------------------
 
-        let mouse_world = (vec2(mouse_position().0, -mouse_position().1)
-                -               vec2(screen_width()*0.5, -screen_height()*0.5))
-            / zoom + camera_pos;
+        let mouse_screen = vec2(mouse_position().0, -mouse_position().1);
+        let screen_center = vec2(screen_width() * 0.5, -screen_height() * 0.5);
+        // Mouse picking works purely on screen space & true zoom
+        let mouse_world = (mouse_screen - screen_center) / zoom + camera_pos;
 
         bubbles[2].x = mouse_world.x;
         bubbles[2].y = mouse_world.y;
@@ -145,6 +158,34 @@ async fn main() {
         if is_key_down(KeyCode::Down) {
             camera_pos.y -= 5.0;
         }
+
+        // --- 1. HANDLE WINDOW RESIZING ---
+        let current_screen_size = (screen_width(), screen_height());
+        if current_screen_size != last_screen_size {
+            render_t = render_target(
+                (current_screen_size.0 * render_scale) as u32,
+                (current_screen_size.1 * render_scale) as u32,
+            );
+            render_t.texture.set_filter(FilterMode::Linear);
+            last_screen_size = current_screen_size;
+        }
+
+        let fbo_width = render_t.texture.width();
+        let fbo_height = render_t.texture.height();
+
+        // --- 2. SETUP OFFSCREEN CAMERA ---
+        // A camera that perfectly maps 1:1 to the render target's pixels
+        let mut offscreen_camera = Camera2D::from_display_rect(Rect::new(
+            0.0,
+            0.0,
+            fbo_width,
+            fbo_height,
+        ));
+        offscreen_camera.render_target = Some(render_t.clone());
+        
+        // --- 3. PREPARE OFFSCREEN BUFFER ---
+        set_camera(&offscreen_camera);
+        clear_background(BLACK);
 
         // -------------------------------------------------
         // CPU -> GPU EXTRACTION
@@ -183,21 +224,12 @@ async fn main() {
         // SHADER UNIFORMS
         // -------------------------------------------------
 
-        material.set_uniform(
-            "u_resolution",
-            (
-                screen_width(),
-                screen_height()
-            )
-        );
-        material.set_uniform(
-            "u_camera_pos",
-            camera_pos
-        );
-        material.set_uniform(
-            "u_zoom",
-            zoom
-        );
+        // Feed the HALF resolution to the shader, not the screen resolution!
+        material.set_uniform("u_resolution", vec2(fbo_width, fbo_height));
+        material.set_uniform("u_camera_pos", camera_pos);
+        // Scale zoom by render_scale so 1 FBO pixel spans the correct world distance
+        material.set_uniform("u_zoom", zoom * render_scale);
+
         material.set_uniform(
             "u_bubble_count",
             bubble_buffers.bubble_count()
@@ -227,14 +259,28 @@ async fn main() {
         gl_use_material(
             &material
         );
-        draw_rectangle(
-            0.0,
-            0.0,
-            screen_width(),
-            screen_height(),
-            WHITE,
-        );
+        // Draw a full-frame rectangle to trigger the fragment shader for every pixel
+        draw_rectangle(0.0, 0.0, fbo_width, fbo_height, WHITE);
         gl_use_default_material();
+
+        // --- 4. DRAW UPSCALED RESULT TO MAIN SCREEN ---
+        set_default_camera();
+        clear_background(BLACK);
+
+        // Draw the offscreen texture stretched across the entire physical window
+        draw_texture_ex(
+            &render_t.texture,
+            0.0,
+            0.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(screen_width(), screen_height())),
+                // RenderTargets in OpenGL are upside down. Macroquad requires flipping 
+                // it vertically when drawing it back to the screen.
+                flip_y: true, 
+                ..Default::default()
+            },
+        );
 
         draw_text(
             "Move mouse/touch to move the green bubble",
