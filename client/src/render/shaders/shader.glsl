@@ -17,25 +17,8 @@ uniform vec2 u_resolution;
 uniform vec2 u_camera_pos;
 uniform float u_zoom;
 
-// --- COLOR SPACE CONVERSIONS (sRGB <-> Linear <-> Oklab) ---
-vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
+// --- COLOR SPACE CONVERSIONS (Oklab -> Linear -> sRGB Only) ---
 vec3 linear_to_srgb(vec3 c) { return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }
-
-vec3 rgb_to_oklab(vec3 c) {
-    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
-    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
-    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
-
-    float l_ = pow(max(0.0, l), 1.0 / 3.0);
-    float m_ = pow(max(0.0, m), 1.0 / 3.0);
-    float s_ = pow(max(0.0, s), 1.0 / 3.0);
-
-    return vec3(
-        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
-        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
-        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
-    );
-}
 
 vec3 oklab_to_rgb(vec3 lab) {
     float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
@@ -58,39 +41,15 @@ float smin(float a, float b, float k) {
     return mix(b, a, h) - k * h * (1.0 - h);
 }
 
-vec4 read_position_radius(int index)
-{
-    return texelFetch(
-        u_position_radius_texture,
-        ivec2(index, 0),
-        0
-    );
+vec4 read_position_radius(int index) {
+    return texelFetch(u_position_radius_texture, ivec2(index, 0), 0);
 }
 
-vec4 read_color_pressure(int index)
-{
-    return texelFetch(
-        u_color_pressure_texture,
-        ivec2(index, 0),
-        0
-    );
+vec4 read_color_pressure(int index) {
+    return texelFetch(u_color_pressure_texture, ivec2(index, 0), 0);
 }
 
-// void main()
-// {    
-//     vec4 p = read_position_radius(0);
-//     vec4 c = read_color_pressure(0);
-
-//     fragColor = vec4(
-//         c.r,
-//         c.g,
-//         c.b,
-//         1.0
-//     );
-// }
-
-void main()
-{
+void main() {
     vec2 world_pos = (gl_FragCoord.xy - u_resolution * 0.5) / u_zoom + u_camera_pos;
     if (u_bubble_count == 0) { 
         fragColor = vec4(0.015, 0.02, 0.04, 1.0); return;
@@ -104,19 +63,13 @@ void main()
         if (i >= u_bubble_count) break; 
         
         vec4 position_radius = read_position_radius(i);
-        vec2 bubble_pos = position_radius.xy;
-        float radius = position_radius.z;
-
-        float d = length(world_pos - bubble_pos) - radius;
+        float d = length(world_pos - position_radius.xy) - position_radius.z;
         outer_sdf = smin(outer_sdf, d, 35.0);
         
         if (d < d1) {
-            d3 = d2;
-            d2 = d1;
-            d1 = d;
+            d3 = d2; d2 = d1; d1 = d;
         } else if (d < d2) {
-            d3 = d2;
-            d2 = d;
+            d3 = d2; d2 = d;
         } else if (d < d3) {
             d3 = d;
         }
@@ -128,21 +81,27 @@ void main()
     float radius_accum = 0.0;
     float weight_sum = 0.0001;
     
-    const float BLEED_RADIUS = 90.0;
+    const float BLEED_RADIUS = 100.0;
+    const float CULL_RADIUS = BLEED_RADIUS * 3.5; // TODO: this leads to ugly thresholds
     
     for (int i = 0; i < MAX_BUBBLES; i++) {
         if (i >= u_bubble_count) break;
         
         vec4 position_radius = read_position_radius(i);
-        vec4 color_pressure = read_color_pressure(i);
-        vec2 bubble_pos = position_radius.xy;
         float radius = position_radius.z;
-        float light = position_radius.w;
-        vec3 color = color_pressure.rgb;
+        float d = length(world_pos - position_radius.xy) - radius;
         
-        float d = length(world_pos - bubble_pos) - radius;
+        // EARLY DISTANCE CULLING
+        // Skips texture read and expensive math if the bubble is too far to contribute
+        if (d > CULL_RADIUS) continue;
+        
+        vec4 color_pressure = read_color_pressure(i);
+        float light = position_radius.w;
+        
+        // Color is already Oklab! No pow() required.
+        vec3 lab_col = color_pressure.rgb;
+        
         float w = exp(-max(0.0, d) / BLEED_RADIUS);
-        vec3 lab_col = rgb_to_oklab(srgb_to_linear(color));
         
         lab_accum += lab_col * w;
         light_accum += light * w;
@@ -151,7 +110,7 @@ void main()
     }
     
     vec3 avg_lab = lab_accum / weight_sum;
-    float avg_light = clamp(light_accum / (weight_sum), 0.0, 1000.0); // Cap maximum brightness
+    float avg_light = light_accum / (weight_sum);
     float avg_radius = radius_accum / weight_sum;
     vec3 blended_srgb = linear_to_srgb(oklab_to_rgb(avg_lab));
     
@@ -160,6 +119,7 @@ void main()
     const float MAX_WALL_WIDTH = 12.0;
     const float REF_MIN_RADIUS = 20.0;
     const float REF_MAX_RADIUS = 120.0;
+
     float radius_t = clamp((avg_radius - REF_MIN_RADIUS) / (REF_MAX_RADIUS - REF_MIN_RADIUS), 0.0, 1.0);
     float dynamic_wall_width = mix(MIN_WALL_WIDTH, MAX_WALL_WIDTH, radius_t);
     float raw_wall = (d2 - d1) * 0.5;
@@ -198,5 +158,7 @@ void main()
     float outer_halo = exp(-dist * (0.005 / halo_scale)) * 0.4;
     float total_halo = (inner_halo + outer_halo) * avg_light * HALO_BOOST;
     
-    final_color += blended_srgb * total_halo; fragColor = vec4(final_color, 1.0);
+    final_color += blended_srgb * total_halo; 
+    
+    fragColor = vec4(final_color, 1.0);
 }
