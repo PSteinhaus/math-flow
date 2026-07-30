@@ -66,12 +66,12 @@ impl BubbleBuffers {
             );
 
         self.position_radius
-            .upload(
+            .upload_gl(
                 scene.position_radius_data()
             );
 
         self.color_pressure
-            .upload(
+            .upload_gl(
                 scene.color_pressure_data()
             );
     }
