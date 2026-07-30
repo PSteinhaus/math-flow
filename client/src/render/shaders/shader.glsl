@@ -82,7 +82,7 @@ void main() {
     float weight_sum = 0.0001;
     
     const float BLEED_RADIUS = 100.0;
-    const float CULL_RADIUS = BLEED_RADIUS * 3.5; // TODO: this leads to ugly thresholds
+    const float CULL_RADIUS = BLEED_RADIUS * 5.5; // we need to be careful not to create ugly thresholds here
     
     for (int i = 0; i < MAX_BUBBLES; i++) {
         if (i >= u_bubble_count) break;
@@ -102,6 +102,11 @@ void main() {
         vec3 lab_col = color_pressure.rgb;
         
         float w = exp(-max(0.0, d) / BLEED_RADIUS);
+
+        // WINDOW FUNCTION (making the culling cut-offs tolerable)
+        // Smoothly pinch the weight to exactly 0.0 over the last 30% of the cull distance.
+        // We use '1.0 - smoothstep' because OpenGL ES results are undefined if edge0 > edge1.
+        w *= 1.0 - smoothstep(CULL_RADIUS * 0.8, CULL_RADIUS, d);
         
         lab_accum += lab_col * w;
         light_accum += light * w;
