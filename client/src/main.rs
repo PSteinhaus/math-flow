@@ -81,32 +81,38 @@ async fn main() {
     // TEST WORLD
     // -----------------------------------------------------
 
-    let mut bubbles = vec![
-        BubbleData::new(
-            1,
-            0.0,
-            0.0,
-            120.0,
-            0.4,
-            [0.0, 0.0, 1.0],
-        ),
-        BubbleData::new(
-            2,
-            -160.0,
-            40.0,
-            70.0,
-            0.7,
-            [1.0, 0.0, 0.0],
-        ),
-        BubbleData::new(
-            3,
-            150.0,
-            -80.0,
-            90.0,
-            0.7,
-            [0.0, 1.0, 0.0],
-        ),
-    ];
+    let mut bubbles: Vec<BubbleData> = (1..=100).map(|i| {
+        if i == 100 {
+            // Last bubble follows the mouse cursor (green)
+            BubbleData::new(
+                i as u64,
+                0.0,
+                0.0,
+                90.0,
+                0.7,
+                [0.0, 1.0, 0.0],
+            )
+        } else {
+            // Random bubbles
+            let x = rand::gen_range(-1500.0, 1500.0);
+            let y = rand::gen_range(-1500.0, 1500.0);
+            let radius = rand::gen_range(20.0, 190.0);
+            let light = rand::gen_range(0.1, 1.0);
+            let color = [
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+            ];
+            BubbleData::new(
+                i as u64,
+                x,
+                y,
+                radius,
+                light,
+                color,
+            )
+        }
+    }).collect();
 
     let mut gpu_scene =
         GpuScene::new();
@@ -117,7 +123,7 @@ async fn main() {
     let mut camera_pos =
         vec2(0.0,0.0);
 
-    let zoom = 1.0;
+    let zoom = 0.5;
     
     // Initialize the offscreen Render Target (Half scale)
     let render_scale = 0.5; // 0.5 = half resolution, 0.75 = 3/4 resolution
@@ -143,8 +149,8 @@ async fn main() {
         // Mouse picking works purely on screen space & true zoom
         let mouse_world = (mouse_screen - screen_center) / zoom + camera_pos;
 
-        bubbles[2].x = mouse_world.x;
-        bubbles[2].y = mouse_world.y;
+        bubbles[99].x = mouse_world.x;
+        bubbles[99].y = mouse_world.y;
 
         if is_key_down(KeyCode::Left) {
             camera_pos.x -= 5.0;

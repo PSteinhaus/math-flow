@@ -71,7 +71,7 @@ void main() {
     float radius_accum = 0.0;
     float weight_sum = 0.0001;
 
-    const float BLEED_RADIUS = 100.0;
+    const float BLEED_RADIUS = 70.0;
     const float CULL_RADIUS = BLEED_RADIUS * 5.5;
 
     for (int i = 0; i < MAX_BUBBLES; i++) {
